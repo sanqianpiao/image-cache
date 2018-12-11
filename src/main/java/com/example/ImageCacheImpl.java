@@ -14,6 +14,7 @@ public class ImageCacheImpl implements ImageCache {
     private final ImageService imageService;
     private String cacheDir;
     private final ConcurrentMap<String, Integer> leaseCount = new ConcurrentHashMap<>();
+    private final Object[] locks;
 
     public ImageCacheImpl(ImageService imageService, String cacheDir) {
         this.imageService = imageService;
@@ -22,6 +23,16 @@ public class ImageCacheImpl implements ImageCache {
         if (new File(this.cacheDir).exists() == false) {
             throw new IllegalArgumentException("Cache directory does not exist: " + this.cacheDir);
         }
+
+        locks = new Object[16];
+        for (int i = 0; i < locks.length; i++) {
+            locks[i] = new Object();
+        }
+    }
+
+    private Object getLock(String filename) {
+        int index = Math.abs(filename.hashCode() % 16);
+        return locks[index];
     }
 
     private String filename(String url) {
@@ -45,7 +56,7 @@ public class ImageCacheImpl implements ImageCache {
         File file = locateCacheFile(filename);
         if (file.exists()) return file;
 
-        synchronized (this) {
+        synchronized (getLock(filename)) {
             if (file.exists()) return file;
 
             byte[] bytes = imageService.get(url);
@@ -66,7 +77,7 @@ public class ImageCacheImpl implements ImageCache {
         if (leaseCount.containsKey(filename) == false)
             throw new ImageCacheException("Cached File Does Not Exist. url: " + url);
 
-        synchronized (this) {
+        synchronized (getLock(filename)) {
             leaseCount.compute(filename, (k, v) -> v - 1);
             if (leaseCount.get(filename) == 0) {
                 leaseCount.remove(filename);
